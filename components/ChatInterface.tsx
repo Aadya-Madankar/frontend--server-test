@@ -1,241 +1,291 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { streamTextResponse } from '../services/geminiService';
+import { streamTextResponse, startLiveConversation } from '../services/geminiService';
 import type { Message } from '../types';
 import { SendIcon, LinkIcon } from './icons';
 
-const AGENT_NAME = 'Rani Bhat';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://serrver-test-production.up.railway.app';
 
-const ChatHeader: React.FC<{ isTyping: boolean }> = ({ isTyping }) => (
-    <div className="p-4 bg-brand-surface/90 border-b border-brand-bg-alt flex items-center space-x-4">
-        <div className="relative">
-            <div className="w-12 h-12 rounded-full bg-brand-primary flex items-center justify-center text-white font-bold text-xl font-serif">R</div>
-            <span className="absolute bottom-0 right-0 block h-3.5 w-3.5 rounded-full bg-green-400 border-2 border-white"></span>
-        </div>
-        <div>
-            <h2 className="text-lg font-bold text-brand-secondary">Rani Bhat</h2>
-            <p className="text-sm text-brand-secondary/70 transition-opacity duration-300">{isTyping ? 'typing...' : 'Online'}</p>
-        </div>
-    </div>
-);
+interface Agent {
+  name: string;
+  displayName: string;
+}
 
-const TypingIndicator: React.FC = () => (
-    <div className="flex justify-start">
-        <div className="w-fit max-w-xs p-4 rounded-2xl bg-brand-bg-alt text-brand-secondary rounded-bl-none flex items-center space-x-2">
-            <div className="w-2 h-2 bg-brand-secondary/40 rounded-full animate-pulse"></div>
-            <div className="w-2 h-2 bg-brand-secondary/40 rounded-full animate-pulse [animation-delay:0.2s]"></div>
-            <div className="w-2 h-2 bg-brand-secondary/40 rounded-full animate-pulse [animation-delay:0.4s]"></div>
-        </div>
-    </div>
-);
-
+interface AgentConfig {
+  name: string;
+  chatPrompt: string;
+  model: string;
+}
 
 const ChatInterface: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'initial-greeting',
-      text: "Hey! Rani here. 💕 So glad you slid into my DMs... What's the plan? 😉",
-      sender: 'bot'
-    }
-  ]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [useSearch, setUseSearch] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
+  const [availableAgents, setAvailableAgents] = useState<Agent[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLiveActive, setIsLiveActive] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const liveSessionRef = useRef<any>(null);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const generationSessionIdRef = useRef(0);
-
-
+  // Load available agents on mount
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
-
-  const handleSend = async () => {
-    if (!input.trim()) return;
-
-    const currentSessionId = ++generationSessionIdRef.current;
-    
-    const newUserMessage: Message = { id: Date.now().toString(), text: input, sender: 'user' };
-    const currentMessages = [...messages, newUserMessage];
-    setMessages(currentMessages);
-    setInput('');
-    setIsLoading(true);
-
-    const MAX_HISTORY_MESSAGES = 20;
-    const history = currentMessages
-        .filter(m => m.id !== 'initial-greeting')
-        .slice(-MAX_HISTORY_MESSAGES)
-        .map(m => ({
-            role: m.sender === 'user' ? 'user' as const : 'model' as const,
-            parts: [{ text: m.text }]
-        }));
-    
-    let currentBotMessageId: string | null = null;
-    let buffer = '';
-    
-    try {
-        const responseStream = await streamTextResponse(raniAgentConfig, newUserMessage.text, history, useSearch);
-        const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
+    const fetchAgents = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${API_BASE_URL}/api/agents`);
+        if (!response.ok) throw new Error('Failed to fetch agents');
         
-        for await (const chunk of responseStream) {
-            if (generationSessionIdRef.current !== currentSessionId) {
-                setMessages(prev => prev.filter(msg => msg.id !== currentBotMessageId || msg.text.trim() !== ''));
-                return;
-            }
-
-            buffer += chunk.textChunk || '';
-
-            const commandRegex = /(\[REACT:[^\]]+\]|\[MSG_BREAK\])/g;
-            let match;
-            let lastIndex = 0;
-
-            // Process all complete commands in the buffer
-            while((match = commandRegex.exec(buffer)) !== null) {
-                const command = match[0];
-                const commandIndex = match.index;
-                const textPart = buffer.substring(lastIndex, commandIndex);
-
-                // 1. Append any text before the command
-                if (textPart) {
-                    if (!currentBotMessageId) {
-                        currentBotMessageId = `${Date.now()}-bot`;
-                        setMessages(prev => [...prev, { id: currentBotMessageId!, text: textPart, sender: 'bot', sources: [] }]);
-                    } else {
-                        setMessages(prev => prev.map(msg => msg.id === currentBotMessageId ? { ...msg, text: msg.text + textPart } : msg));
-                    }
-                }
-                
-                // 2. Handle the command
-                if (command.startsWith('[REACT:')) {
-                    const emoji = command.match(/\[REACT:([^\]]+)\]/)![1];
-                    setMessages(prev => {
-                        const updated = [...prev];
-                        let lastUserMessageIndex = -1;
-                        for (let i = updated.length - 1; i >= 0; i--) {
-                            if (updated[i].sender === 'user') {
-                                lastUserMessageIndex = i;
-                                break;
-                            }
-                        }
-                        if (lastUserMessageIndex !== -1 && !updated[lastUserMessageIndex].reaction) {
-                            updated[lastUserMessageIndex] = { ...updated[lastUserMessageIndex], reaction: emoji };
-                        }
-                        return updated;
-                    });
-                } else if (command === '[MSG_BREAK]') {
-                    currentBotMessageId = null;
-                    await wait(Math.random() * 500 + 400); // Natural delay
-                }
-                
-                lastIndex = commandRegex.lastIndex;
-            }
-
-            // Update buffer with the remaining part that didn't form a complete command
-            buffer = buffer.substring(lastIndex);
-            
-            // Append the remaining non-command text to the current message
-            if (buffer) {
-                 if (!currentBotMessageId) {
-                    currentBotMessageId = `${Date.now()}-bot-tail`;
-                    setMessages(prev => [...prev, { id: currentBotMessageId!, text: buffer, sender: 'bot', sources: [] }]);
-                } else {
-                    setMessages(prev => prev.map(msg => msg.id === currentBotMessageId ? { ...msg, text: msg.text + buffer } : msg));
-                }
-            }
-            // After appending the tail, the buffer is "spent" for this chunk, but we keep the partial command for the next chunk
-            buffer = buffer.substring(lastIndex);
-
-
-            if (chunk.sources) {
-                if (!currentBotMessageId) {
-                     currentBotMessageId = `${Date.now()}-bot-sources`;
-                     setMessages(prev => [...prev, { id: currentBotMessageId!, text: '', sender: 'bot', sources: chunk.sources }]);
-                } else {
-                    setMessages(prev => prev.map(msg => {
-                        if (msg.id === currentBotMessageId) {
-                            const existingUris = new Set(msg.sources?.map(s => s.uri));
-                            const newSources = chunk.sources!.filter(s => !existingUris.has(s.uri));
-                            return { ...msg, sources: [...(msg.sources || []), ...newSources] };
-                        }
-                        return msg;
-                    }));
-                }
-            }
+        const data = await response.json();
+        setAvailableAgents(data.agents);
+        
+        if (data.agents.length > 0) {
+          await selectAgent(data.agents[0]);
         }
-    } catch (error) {
-        console.error("Error during streaming response:", error);
-         if (currentBotMessageId) {
-            setMessages(prev => prev.map(msg => msg.id === currentBotMessageId ? {...msg, text: msg.text + "\n\nOops, something went wrong."} : msg));
-         } else {
-            setMessages(prev => [...prev, {id: 'error-msg', text: "Oops, something went wrong. Please try again.", sender: 'bot'}]);
-         }
+      } catch (err) {
+        setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        console.error('Error fetching agents:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAgents();
+  }, []);
+
+  // Select agent and fetch its config
+  const selectAgent = async (agent: Agent) => {
+    try {
+      setLoading(true);
+      setSelectedAgent(agent);
+      
+      const response = await fetch(`${API_BASE_URL}/api/agents/${agent.name}/config`);
+      if (!response.ok) throw new Error('Failed to fetch agent config');
+      
+      const config = await response.json();
+      setAgentConfig(config);
+      setMessages([]);
+      setError(null);
+    } catch (err) {
+      setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Error selecting agent:', err);
     } finally {
-         if (generationSessionIdRef.current === currentSessionId) {
-            setIsLoading(false);
-            // Final cleanup of any empty message bubbles
-            setMessages(prev => prev.filter(msg => msg.text.trim() !== '' || (msg.sources && msg.sources.length > 0)));
-        }
+      setLoading(false);
     }
   };
 
-  return (
-    <div className="flex flex-col h-[80vh] bg-brand-surface rounded-lg shadow-2xl overflow-hidden border border-brand-bg-alt">
-        <ChatHeader isTyping={isLoading} />
-        <div className="flex-grow p-6 overflow-y-auto space-y-6 bg-brand-bg-light">
-        {messages.map((msg) => (
-          // Only render the message if it has text content or sources
-          (msg.text.trim() || (msg.sources && msg.sources.length > 0)) && (
-            <div key={msg.id} className={`flex items-end gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`relative w-fit max-w-lg p-3 px-4 rounded-2xl shadow-sm ${msg.sender === 'user' ? 'bg-brand-primary text-white rounded-br-none' : 'bg-brand-bg-alt text-brand-secondary rounded-bl-none'}`}>
-                <p className="whitespace-pre-wrap">{msg.text}</p>
-                {msg.sources && msg.sources.length > 0 && (
-                    <div className={`mt-3 border-t pt-2 ${msg.text.trim() ? 'mt-3' : 'mt-0'} ${msg.sender === 'user' ? 'border-white/30' : 'border-brand-secondary/20'}`}>
-                        <h4 className="text-xs font-bold mb-1 opacity-80">Sources:</h4>
-                        <ul className="space-y-1">
-                            {msg.sources.map((source, index) => (
-                                <li key={index}>
-                                    <a href={source.uri} target="_blank" rel="noopener noreferrer" className={`text-xs ${msg.sender === 'user' ? 'text-white/80 hover:underline' : 'text-brand-primary hover:underline'} flex items-center gap-1`}>
-                                        <LinkIcon className="w-3 h-3"/>
-                                        {source.title}
-                                    </a>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-                 {msg.sender === 'user' && msg.reaction && (
-                      <div className="absolute -bottom-3 -right-3 bg-brand-surface shadow-lg rounded-full w-7 h-7 flex items-center justify-center text-sm">
-                          <span>{msg.reaction}</span>
-                      </div>
-                  )}
-              </div>
+  const handleSendMessage = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || !agentConfig || !selectedAgent) return;
+    
+    const userMessage = inputRef.current?.value.trim();
+    if (!userMessage) return;
+
+    setMessages(prev => [...prev, { text: userMessage, role: 'user', sources: [] }]);
+    if (inputRef.current) inputRef.current.value = '';
+
+    setIsTyping(true);
+    try {
+      const stream = await streamTextResponse(selectedAgent.name, userMessage, messages);
+      let fullResponse = '';
+      
+      for await (const chunk of stream) {
+        if (chunk.textChunk) {
+          fullResponse += chunk.textChunk;
+          setMessages(prev => [
+            ...prev.slice(0, -1),
+            { text: fullResponse, role: 'model', sources: chunk.sources || [] }
+          ]);
+        }
+      }
+    } catch (err) {
+      setError(`Chat error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Chat error:', err);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleStartLive = async () => {
+    if (!selectedAgent) return;
+
+    try {
+      setLoading(true);
+      const session = await startLiveConversation(selectedAgent.name, {
+        onopen: () => {
+          setIsLiveActive(true);
+          console.log('Live session started');
+        },
+        onmessage: (message) => {
+          console.log('Received message:', message);
+        },
+        onerror: (e) => {
+          setError(`Live session error: ${e.message}`);
+          console.error('Live session error:', e);
+        },
+        onclose: (e) => {
+          setIsLiveActive(false);
+          console.log('Live session closed');
+        }
+      });
+
+      liveSessionRef.current = session;
+    } catch (err) {
+      setError(`Failed to start live session: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Failed to start live session:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEndLive = () => {
+    if (liveSessionRef.current) {
+      liveSessionRef.current.close();
+      liveSessionRef.current = null;
+      setIsLiveActive(false);
+    }
+  };
+
+  // Agent selection screen
+  if (!selectedAgent || !agentConfig) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-purple-900 to-black">
+        {loading ? (
+          <div className="text-white text-xl">Loading agents...</div>
+        ) : error ? (
+          <div className="text-red-500 text-center max-w-md">
+            <p className="mb-4">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <>
+            <h1 className="text-4xl font-bold text-white mb-8">Select an Agent</h1>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {availableAgents.map(agent => (
+                <button
+                  key={agent.name}
+                  onClick={() => selectAgent(agent)}
+                  disabled={loading}
+                  className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition disabled:opacity-50"
+                >
+                  {agent.displayName}
+                </button>
+              ))}
             </div>
-          )
-        ))}
-        {isLoading && <TypingIndicator />}
-        <div ref={chatEndRef} />
+          </>
+        )}
       </div>
-      <div className="p-4 bg-brand-surface/90 border-t border-brand-bg-alt">
-        <div className="flex space-x-2 md:space-x-4 mb-3">
-             <label className="flex items-center space-x-2 cursor-pointer text-sm text-brand-secondary/80">
-                <input type="checkbox" checked={useSearch} onChange={(e) => setUseSearch(e.target.checked)} className="rounded text-brand-primary focus:ring-brand-primary-light" />
-                <span>Search Web</span>
-            </label>
+    );
+  }
+
+  // Chat screen
+  return (
+    <div className="flex flex-col h-screen bg-black">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-purple-900 to-black p-4 border-b border-purple-800">
+        <div className="flex justify-between items-center">
+          <h1 className="text-white text-2xl font-bold">{agentConfig.name}</h1>
+          <div className="flex gap-2">
+            {isLiveActive ? (
+              <button
+                onClick={handleEndLive}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+              >
+                End Live Call
+              </button>
+            ) : (
+              <button
+                onClick={handleStartLive}
+                disabled={loading}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
+              >
+                Start Voice Call
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSelectedAgent(null);
+                setAgentConfig(null);
+                setMessages([]);
+              }}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition"
+            >
+              Change Agent
+            </button>
+          </div>
         </div>
-        <div className="flex items-center bg-brand-bg-alt rounded-lg">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            placeholder="Type your message..."
-            className="flex-grow p-4 bg-transparent focus:outline-none text-brand-secondary"
-          />
-          <button onClick={handleSend} disabled={!input.trim() && !isLoading} className="p-4 text-brand-primary disabled:text-gray-400 transition-colors">
-            <SendIcon className="w-6 h-6"/>
+      </div>
+
+      {/* Error message */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-700 text-red-200 p-3 m-2 rounded-lg">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="float-right text-lg font-bold"
+          >
+            ✕
           </button>
         </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center text-gray-500 mt-10">
+            <p>Start a conversation with {agentConfig.name}</p>
+          </div>
+        )}
+        {messages.map((msg, idx) => (
+          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+              msg.role === 'user'
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-800 text-gray-100'
+            }`}>
+              <p>{msg.text}</p>
+              {msg.sources && msg.sources.length > 0 && (
+                <div className="mt-2 text-sm text-gray-300 border-t border-gray-600 pt-2">
+                  {msg.sources.map((source, i) => (
+                    <a
+                      key={i}
+                      href={source.uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-blue-400 hover:underline truncate"
+                    >
+                      {source.title}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {isTyping && (
+          <div className="flex justify-start">
+            <div className="bg-gray-800 px-4 py-2 rounded-lg text-gray-500">typing...</div>
+          </div>
+        )}
       </div>
+
+      {/* Input */}
+      {!isLiveActive && (
+        <div className="p-4 border-t border-purple-800">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder={`Message ${agentConfig.name}...`}
+            onKeyPress={handleSendMessage}
+            disabled={loading || isTyping}
+            className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg outline-none focus:ring-2 focus:ring-purple-600 disabled:opacity-50 transition"
+          />
+        </div>
+      )}
     </div>
   );
 };
