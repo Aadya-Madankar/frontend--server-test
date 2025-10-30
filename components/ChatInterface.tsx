@@ -3,7 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { streamTextResponse } from '../services/geminiService';
 import type { Message } from '../types';
 import { SendIcon, LinkIcon } from './icons';
-import { raniAgentConfig } from '../server/src/agents/configs/rani.agent.config';
+
+const AGENT_NAME = 'Rani Bhat';
 
 const ChatHeader: React.FC<{ isTyping: boolean }> = ({ isTyping }) => (
     <div className="p-4 bg-brand-surface/90 border-b border-brand-bg-alt flex items-center space-x-4">
