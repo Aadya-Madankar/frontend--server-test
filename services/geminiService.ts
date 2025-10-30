@@ -1,7 +1,7 @@
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import type { StreamResponse } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com:8080';
 
 let ai: GoogleGenAI | null = null;
 
