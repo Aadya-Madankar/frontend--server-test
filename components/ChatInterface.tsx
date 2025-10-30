@@ -75,48 +75,48 @@ const ChatInterface: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || !agentConfig || !selectedAgent) return;
+ const handleSendMessage = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key !== 'Enter' || !agentConfig || !selectedAgent) return;
+  
+  const userMessage = inputRef.current?.value.trim();
+  if (!userMessage) return;
+
+  setMessages(prev => [...prev, { text: userMessage, role: 'user', sources: [] }]);
+  if (inputRef.current) inputRef.current.value = '';
+  setMessages(prev => [...prev, { text: '', role: 'model', sources: [] }]);
+  setIsTyping(true);
+
+  try {
+    const stream = await streamTextResponse(selectedAgent.name, userMessage, messages);
     
-    const userMessage = inputRef.current?.value.trim();
-    if (!userMessage) return;
-
-    // Add user message to chat
-    setMessages(prev => [...prev, { text: userMessage, role: 'user', sources: [] }]);
-    if (inputRef.current) inputRef.current.value = '';
-
-    // Add empty model message for streaming
-    setMessages(prev => [...prev, { text: '', role: 'model', sources: [] }]);
-    setIsTyping(true);
-
-    try {
-      let fullResponse = '';
-      const stream = streamTextResponse(selectedAgent.name, userMessage, messages);
+    if (!stream) throw new Error('No stream received');
+    
+    const reader = stream.getReader();
+    const decoder = new TextDecoder();
+    let fullResponse = '';
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
       
-      for await (const chunk of stream) {
-        fullResponse += chunk;
-        setMessages(prev => {
-          const updated = [...prev];
-          const lastIndex = updated.length - 1;
-          if (updated[lastIndex].role === 'model') {
-            updated[lastIndex] = {
-              ...updated[lastIndex],
-              text: fullResponse
-            };
-          }
-          return updated;
-        });
-      }
-    } catch (err) {
-      setError(`Chat error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      console.error('Chat error:', err);
-      
-      // Remove empty message on error
-      setMessages(prev => prev.slice(0, -1));
-    } finally {
-      setIsTyping(false);
+      fullResponse += decoder.decode(value, { stream: true });
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastIndex = updated.length - 1;
+        if (updated[lastIndex].role === 'model') {
+          updated[lastIndex] = { ...updated[lastIndex], text: fullResponse };
+        }
+        return updated;
+      });
     }
-  };
+  } catch (err) {
+    setError(`Chat error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    setMessages(prev => prev.slice(0, -1));
+  } finally {
+    setIsTyping(false);
+  }
+};
+
 
   const handleStartLive = async () => {
     if (!selectedAgent) return;
