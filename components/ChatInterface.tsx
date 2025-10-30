@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { streamTextResponse, startLiveConversation } from '../services/geminiService';
+import { getAvailableAgents, getAgentConfig, streamTextResponse } from '../services/geminiService';
 import type { Message } from '../types';
 import { SendIcon, LinkIcon } from './icons';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://serrver-test-production.up.railway.app';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com/chat';
 
 interface Agent {
   name: string;
@@ -12,8 +12,9 @@ interface Agent {
 
 interface AgentConfig {
   name: string;
-  chatPrompt: string;
+  chatPrompt?: string;
   model: string;
+  [key: string]: any;
 }
 
 const ChatInterface: React.FC = () => {
@@ -27,23 +28,21 @@ const ChatInterface: React.FC = () => {
   const [isLiveActive, setIsLiveActive] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const liveSessionRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Load available agents on mount
   useEffect(() => {
     const fetchAgents = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/api/agents`);
-        if (!response.ok) throw new Error('Failed to fetch agents');
+        const agents = await getAvailableAgents();
+        setAvailableAgents(agents);
         
-        const data = await response.json();
-        setAvailableAgents(data.agents);
-        
-        if (data.agents.length > 0) {
-          await selectAgent(data.agents[0]);
+        if (agents.length > 0) {
+          await selectAgent(agents[0]);
         }
       } catch (err) {
-        setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        setError(`Error loading agents: ${err instanceof Error ? err.message : 'Unknown error'}`);
         console.error('Error fetching agents:', err);
       } finally {
         setLoading(false);
@@ -53,21 +52,23 @@ const ChatInterface: React.FC = () => {
     fetchAgents();
   }, []);
 
+  // Scroll to bottom when messages update
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   // Select agent and fetch its config
   const selectAgent = async (agent: Agent) => {
     try {
       setLoading(true);
       setSelectedAgent(agent);
       
-      const response = await fetch(`${API_BASE_URL}/api/agents/${agent.name}/config`);
-      if (!response.ok) throw new Error('Failed to fetch agent config');
-      
-      const config = await response.json();
+      const config = await getAgentConfig(agent.name);
       setAgentConfig(config);
       setMessages([]);
       setError(null);
     } catch (err) {
-      setError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setError(`Error loading agent: ${err instanceof Error ? err.message : 'Unknown error'}`);
       console.error('Error selecting agent:', err);
     } finally {
       setLoading(false);
@@ -80,26 +81,38 @@ const ChatInterface: React.FC = () => {
     const userMessage = inputRef.current?.value.trim();
     if (!userMessage) return;
 
+    // Add user message to chat
     setMessages(prev => [...prev, { text: userMessage, role: 'user', sources: [] }]);
     if (inputRef.current) inputRef.current.value = '';
 
+    // Add empty model message for streaming
+    setMessages(prev => [...prev, { text: '', role: 'model', sources: [] }]);
     setIsTyping(true);
+
     try {
-      const stream = await streamTextResponse(selectedAgent.name, userMessage, messages);
       let fullResponse = '';
+      const stream = streamTextResponse(selectedAgent.name, userMessage, messages);
       
       for await (const chunk of stream) {
-        if (chunk.textChunk) {
-          fullResponse += chunk.textChunk;
-          setMessages(prev => [
-            ...prev.slice(0, -1),
-            { text: fullResponse, role: 'model', sources: chunk.sources || [] }
-          ]);
-        }
+        fullResponse += chunk;
+        setMessages(prev => {
+          const updated = [...prev];
+          const lastIndex = updated.length - 1;
+          if (updated[lastIndex].role === 'model') {
+            updated[lastIndex] = {
+              ...updated[lastIndex],
+              text: fullResponse
+            };
+          }
+          return updated;
+        });
       }
     } catch (err) {
       setError(`Chat error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       console.error('Chat error:', err);
+      
+      // Remove empty message on error
+      setMessages(prev => prev.slice(0, -1));
     } finally {
       setIsTyping(false);
     }
@@ -110,19 +123,24 @@ const ChatInterface: React.FC = () => {
 
     try {
       setLoading(true);
+      setError(null);
+
+      const { startLiveConversation } = await import('../services/geminiService');
+      
       const session = await startLiveConversation(selectedAgent.name, {
         onopen: () => {
           setIsLiveActive(true);
           console.log('Live session started');
         },
-        onmessage: (message) => {
-          console.log('Received message:', message);
+        onmessage: (message: any) => {
+          console.log('Live message received:', message);
         },
-        onerror: (e) => {
+        onerror: (e: Error) => {
           setError(`Live session error: ${e.message}`);
+          setIsLiveActive(false);
           console.error('Live session error:', e);
         },
-        onclose: (e) => {
+        onclose: () => {
           setIsLiveActive(false);
           console.log('Live session closed');
         }
@@ -130,8 +148,9 @@ const ChatInterface: React.FC = () => {
 
       liveSessionRef.current = session;
     } catch (err) {
-      setError(`Failed to start live session: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      console.error('Failed to start live session:', err);
+      setError(`Failed to start live: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Failed to start live:', err);
+      setIsLiveActive(false);
     } finally {
       setLoading(false);
     }
@@ -139,7 +158,7 @@ const ChatInterface: React.FC = () => {
 
   const handleEndLive = () => {
     if (liveSessionRef.current) {
-      liveSessionRef.current.close();
+      liveSessionRef.current.close?.();
       liveSessionRef.current = null;
       setIsLiveActive(false);
     }
@@ -195,7 +214,7 @@ const ChatInterface: React.FC = () => {
                 onClick={handleEndLive}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
               >
-                End Live Call
+                End Call
               </button>
             ) : (
               <button
@@ -203,7 +222,7 @@ const ChatInterface: React.FC = () => {
                 disabled={loading}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
               >
-                Start Voice Call
+                Voice Call
               </button>
             )}
             <button
@@ -222,11 +241,11 @@ const ChatInterface: React.FC = () => {
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-900/30 border border-red-700 text-red-200 p-3 m-2 rounded-lg">
-          {error}
+        <div className="bg-red-900/30 border border-red-700 text-red-200 p-3 m-2 rounded-lg flex justify-between items-center">
+          <p>{error}</p>
           <button
             onClick={() => setError(null)}
-            className="float-right text-lg font-bold"
+            className="text-lg font-bold hover:text-red-100"
           >
             ✕
           </button>
@@ -235,7 +254,7 @@ const ChatInterface: React.FC = () => {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !isTyping && (
           <div className="text-center text-gray-500 mt-10">
             <p>Start a conversation with {agentConfig.name}</p>
           </div>
@@ -247,7 +266,7 @@ const ChatInterface: React.FC = () => {
                 ? 'bg-purple-600 text-white'
                 : 'bg-gray-800 text-gray-100'
             }`}>
-              <p>{msg.text}</p>
+              <p className="whitespace-pre-wrap">{msg.text}</p>
               {msg.sources && msg.sources.length > 0 && (
                 <div className="mt-2 text-sm text-gray-300 border-t border-gray-600 pt-2">
                   {msg.sources.map((source, i) => (
@@ -271,6 +290,7 @@ const ChatInterface: React.FC = () => {
             <div className="bg-gray-800 px-4 py-2 rounded-lg text-gray-500">typing...</div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
