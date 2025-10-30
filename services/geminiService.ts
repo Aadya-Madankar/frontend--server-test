@@ -67,11 +67,15 @@ export async function getAgentConfig(agentName: string) {
 // CHAT ENDPOINTS
 // ============================================
 
-export async function* streamTextResponse(
+// ============================================
+// CHAT ENDPOINTS
+// ============================================
+
+export async function streamTextResponse(
   agentName: string,
   message: string,
   history: any[]
-): AsyncGenerator<string> {
+): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const response = await fetch(
       `${API_BASE_URL}/api/agents/${agentName}/chat/stream`,
@@ -83,25 +87,13 @@ export async function* streamTextResponse(
     );
 
     if (!response.ok) throw new Error('Failed to stream chat response');
-    if (!response.body) throw new Error('No response body');
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        yield decoder.decode(value, { stream: true });
-      }
-    } finally {
-      reader.releaseLock();
-    }
+    return response.body;
   } catch (error) {
     console.error('Error streaming chat:', error);
     throw error;
   }
 }
+
 
 // ============================================
 // LIVE CONVERSATION ENDPOINTS
