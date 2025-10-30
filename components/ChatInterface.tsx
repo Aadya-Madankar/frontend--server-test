@@ -3,7 +3,7 @@ import { getAvailableAgents, getAgentConfig, streamTextResponse } from '../servi
 import type { Message } from '../types';
 import { SendIcon, LinkIcon } from './icons';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com/chat';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com';
 
 interface Agent {
   name: string;
