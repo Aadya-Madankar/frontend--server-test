@@ -1,4 +1,4 @@
-import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage } from "@google/genai";
 import type { StreamResponse } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://aadya.com:8080';
@@ -9,7 +9,6 @@ let ai: GoogleGenAI | null = null;
 // BACKEND INTEGRATION FUNCTIONS
 // ============================================
 
-// Fetch API key from backend
 async function getApiKeyFromBackend(): Promise<string> {
   try {
     const response = await fetch(`${API_BASE_URL}/api/key`);
@@ -23,7 +22,6 @@ async function getApiKeyFromBackend(): Promise<string> {
   }
 }
 
-// Get singleton instance of GoogleGenAI
 async function getAiClient(): Promise<GoogleGenAI> {
   if (ai) return ai;
   
@@ -41,20 +39,18 @@ async function getAiClient(): Promise<GoogleGenAI> {
 // AGENT DISCOVERY ENDPOINTS
 // ============================================
 
-// Get all available agents from backend
 export async function getAvailableAgents() {
   try {
     const response = await fetch(`${API_BASE_URL}/api/agents`);
     if (!response.ok) throw new Error('Failed to fetch agents');
     const data = await response.json();
-    return data.agents; // Array of { name, displayName }
+    return data.agents;
   } catch (error) {
     console.error('Error fetching agents:', error);
     throw error;
   }
 }
 
-// Get specific agent config from backend
 export async function getAgentConfig(agentName: string) {
   try {
     const response = await fetch(`${API_BASE_URL}/api/agents/${agentName}/config`);
@@ -71,7 +67,6 @@ export async function getAgentConfig(agentName: string) {
 // CHAT ENDPOINTS
 // ============================================
 
-// Stream chat response from backend
 export async function* streamTextResponse(
   agentName: string,
   message: string,
@@ -112,7 +107,6 @@ export async function* streamTextResponse(
 // LIVE CONVERSATION ENDPOINTS
 // ============================================
 
-// Get live config for voice conversation
 export async function getLiveConfig(agentName: string) {
   try {
     const response = await fetch(
@@ -127,16 +121,13 @@ export async function getLiveConfig(agentName: string) {
   }
 }
 
-// Start live conversation with backend
 export async function startLiveConversation(agentName: string, callbacks: any) {
   try {
-    // Get live config and API key
     const [config, aiClient] = await Promise.all([
       getLiveConfig(agentName),
       getAiClient()
     ]);
 
-    // Connect to Gemini Live API with backend config
     const session = await aiClient.liveConnect({
       model: config.model,
       systemInstruction: config.systemInstruction,
@@ -167,21 +158,3 @@ export async function startLiveConversation(agentName: string, callbacks: any) {
     throw error;
   }
 }
-
-export async function* streamResponse(prompt: string) {
-  try {
-    const aiClient = await getAiClient();
-    const response = await aiClient.generateContentStream({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }]
-    });
-
-    for await (const chunk of response.stream) {
-      const text = chunk.text();
-      if (text) yield text;
-    }
-  } catch (error) {
-    console.error('Error in streamResponse:', error);
-    throw error;
-  }
-}
-
