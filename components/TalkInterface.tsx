@@ -1,7 +1,5 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { startLiveConversation } from '../services/geminiService';
-import { raniAgentConfig } from '../server/src/agents/configs/rani.agent.config'; // <-- FIX: Import config directly
 import type { LiveServerMessage, Blob as GeminiBlob } from '@google/genai';
 import { MicIcon, StopIcon } from './icons';
 
@@ -83,14 +81,14 @@ const TalkInterface: React.FC = () => {
         setIsLive(false);
         setLiveStatus('Conversation ended. Click to start again.');
 
-        sessionPromiseRef.current?.then(session => session.close()).catch(e => console.error("Error closing live session:", e));
+        sessionPromiseRef.current?.then(session => session.close()).catch(e => console.error("Error closing:", e));
         streamRef.current?.getTracks().forEach(track => track.stop());
         
         scriptProcessorRef.current?.disconnect();
         mediaStreamSourceRef.current?.disconnect();
 
-        inputAudioContextRef.current?.close().catch(e => {});
-        outputAudioContextRef.current?.close().catch(e => {});
+        inputAudioContextRef.current?.close().catch(() => {});
+        outputAudioContextRef.current?.close().catch(() => {});
 
         sessionPromiseRef.current = null;
         streamRef.current = null;
@@ -169,13 +167,13 @@ const TalkInterface: React.FC = () => {
                             currentBotTranscription = '';
                         }
                     } catch (error) {
-                        console.error("Error processing live message:", error);
-                        setLiveStatus("An error occurred during the call.");
+                        console.error("Error processing message:", error);
+                        setLiveStatus("An error occurred.");
                         handleStopLive();
                     }
                 },
                 onerror: (e: ErrorEvent) => {
-                    console.error('Live conversation error:', e);
+                    console.error('Error:', e);
                     setLiveStatus('An error occurred. Please try again.');
                     handleStopLive();
                 },
@@ -183,10 +181,11 @@ const TalkInterface: React.FC = () => {
                     handleStopLive();
                 },
             };
-            // FIX: Pass the directly imported config to the service.
-            sessionPromiseRef.current = startLiveConversation(raniAgentConfig, callbacks);
+            
+            // ✅ CLEAN: Just call with agent name, server handles everything
+            sessionPromiseRef.current = startLiveConversation('rani-bhat', callbacks);
         } catch (error) {
-            console.error('Error getting user media:', error);
+            console.error('Microphone error:', error);
             setLiveStatus('Microphone permission denied.');
             setIsLive(false);
         }
