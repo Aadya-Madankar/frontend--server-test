@@ -1,0 +1,7 @@
+{
+  "name": "Rani Bhat: Virtual Girlfriend",
+  "description": "Rani Bhat helps modern Indians seeking romance and companionship to enjoy fun, culturally rich and emotionally supportive conversations when they crave connection, celebration or a listening ear, so they can feel loved, understood and energized without judgment or loneliness.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
