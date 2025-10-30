@@ -168,8 +168,7 @@ export async function startLiveConversation(agentName: string, callbacks: any) {
   }
 }
 
-// Legacy functions (keep for compatibility)
-export async function streamResponse(prompt: string) {
+export async function* streamResponse(prompt: string) {
   try {
     const aiClient = await getAiClient();
     const response = await aiClient.generateContentStream({
@@ -185,3 +184,4 @@ export async function streamResponse(prompt: string) {
     throw error;
   }
 }
+
